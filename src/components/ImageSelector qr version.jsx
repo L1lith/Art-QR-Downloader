@@ -1,11 +1,15 @@
 import { createSignal, onMount } from 'solid-js';
 import { imageStore, initImageStore, removeFromCache } from '../imageCache';
+import QRCode from 'qrcode';
 import JSZip from 'jszip';
 import LICENSE from '../../LICENSE.md?raw';
 
+console.log(LICENSE)
+
 const ImageSelector = () => {
   const [selectedImages, setSelectedImages] = createSignal([]);
-  const [showNFCModal, setShowNFCModal] = createSignal(false);
+  const [showQRCodeModal, setShowQRCodeModal] = createSignal(false);
+  const [qrCodeDataURL, setQRCodeDataURL] = createSignal('');
 
   const toggleImageSelection = (image) => {
     setSelectedImages((prevSelectedImages) => {
@@ -17,33 +21,42 @@ const ImageSelector = () => {
     });
   };
 
-  const transferFilesViaNFC = async () => {
+  const generateQRCode = async () => {
     const zip = new JSZip();
     const licenseFile = zip.file('LICENSE.md', LICENSE);
-
+  
+    console.log('adding images to zip')
     for (const image of selectedImages()) {
       const fileName = image.name;
       const fileData = await image.blob.arrayBuffer();
       zip.folder('images').file(fileName, fileData);
     }
-
+  
     const zipBlob = await zip.generateAsync({ type: 'blob' });
+    console.log('generating zip data url')
+    const zipDataURL = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(zipBlob);
+    });
 
-    if ('NDEFReader' in window) {
-      const ndef = new window.NDEFReader();
-      try {
-        await ndef.write({ records: [{ data: zipBlob, mediaType: 'application/octet-stream' }] });
-        setShowNFCModal(true);
-      } catch (error) {
-        console.error('Error writing NFC data:', error);
+    console.log("converting to canvas")
+  
+    const canvas = document.createElement('canvas');
+    QRCode.toCanvas(canvas, zipDataURL, { errorCorrectionLevel: 'H' }, (error) => {
+      if (error) {
+        console.error('Error generating QR code:', error);
+      } else {
+        const qrCodeDataURL = canvas.toDataURL('image/png');
+        setQRCodeDataURL(qrCodeDataURL);
+        setShowQRCodeModal(true);
       }
-    } else {
-      console.error('Web NFC API is not supported in this browser.');
-    }
+    });
+    console.log('done converting to canvas')
   };
 
-  const closeNFCModal = () => {
-    setShowNFCModal(false);
+  const closeQRCodeModal = () => {
+    setShowQRCodeModal(false);
   };
 
   onMount(() => {
@@ -52,7 +65,7 @@ const ImageSelector = () => {
 
   return (
     <div>
-      <button onClick={transferFilesViaNFC}>Transfer Files via NFC</button>
+      <button onClick={generateQRCode}>Generate QR Code</button>
       <div
         style={{
           display: 'grid',
@@ -76,7 +89,7 @@ const ImageSelector = () => {
           )}
         </For>
       </div>
-      {showNFCModal() && (
+      {showQRCodeModal() && (
         <div
           style={{
             position: 'fixed',
@@ -109,11 +122,11 @@ const ImageSelector = () => {
                 fontSize: '20px',
                 cursor: 'pointer',
               }}
-              onClick={closeNFCModal}
+              onClick={closeQRCodeModal}
             >
               &times;
             </button>
-            <p>Hold your NFC-enabled device near the NFC reader to transfer the files.</p>
+            <img src={qrCodeDataURL()} alt="QR Code" />
           </div>
         </div>
       )}
